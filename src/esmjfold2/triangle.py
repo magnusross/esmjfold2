@@ -7,10 +7,37 @@ from __future__ import annotations
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float
 
 from .backend import AbstractFromTorch, from_torch
-from .primitives import Linear, LayerNorm
+from .primitives import LayerNorm, Linear
+
+
+def _project_channel_major(linear: Linear, x):
+    """Apply a Linear to [B, N, N, C], writing [Out, B, N, N]."""
+    y = jax.lax.dot_general(linear.weight, x, (((1,), (3,)), ((), ())))
+    if linear.bias is not None:
+        y = y + linear.bias[:, None, None, None]
+    return y
+
+
+def _project_channel_last(linear: Linear, x):
+    """Apply a Linear to [In, B, N, N], writing [B, N, N, Out]."""
+    y = jax.lax.dot_general(x, linear.weight, (((0,), (1,)), ((), ())))
+    if linear.bias is not None:
+        y = y + linear.bias
+    return y
+
+
+def _channel_major_layer_norm(norm: LayerNorm, x):
+    """Match LayerNorm arithmetic while reducing over the leading channel axis."""
+    mean = jnp.mean(x, axis=0, keepdims=True)
+    var = jnp.mean(jnp.square(x - mean), axis=0, keepdims=True)
+    x = (x - mean) * jax.lax.rsqrt(var + norm.eps)
+    if norm.weight is not None:
+        x = x * norm.weight[:, None, None, None]
+    if norm.bias is not None:
+        x = x + norm.bias[:, None, None, None]
+    return x
 
 
 class TriangleMultiplicativeBlock(AbstractFromTorch):
@@ -33,22 +60,25 @@ class TriangleMultiplicativeBlock(AbstractFromTorch):
             mask = jnp.ones(pair_grid.shape[:-1], dtype=pair_grid.dtype)
 
         normalized = self.norm_start(pair_grid)
-        bundled = self.proj_bundle(normalized)
-        # Split into [signal (2*latent), gate (2*latent)]
-        signal, gate_logits = jnp.split(bundled, 2, axis=-1)
+        # The contraction is a channel-batched matrix multiplication. Write its
+        # operands in that layout directly, avoiding transposes around the GEMM.
+        bundled = _project_channel_major(self.proj_bundle, normalized)
+        signal, gate_logits = jnp.split(bundled, 2, axis=0)
         routed = signal * jax.nn.sigmoid(gate_logits)
-        routed = routed * mask[..., None]
+        routed = routed * mask[None]
 
-        left, right = jnp.split(routed, 2, axis=-1)
+        left, right = jnp.split(routed, 2, axis=0)
         left = left.astype(jnp.float32)
         right = right.astype(jnp.float32)
         if self.flow == "outgoing":
-            contracted = jnp.einsum("bikd,bjkd->bijd", left, right)
+            contracted = jax.lax.dot_general(left, right, (((3,), (3,)), ((0, 1), (0, 1))))
         else:
-            contracted = jnp.einsum("bkid,bkjd->bijd", left, right)
+            contracted = jax.lax.dot_general(left, right, (((2,), (2,)), ((0, 1), (0, 1))))
         contracted = contracted.astype(pair_grid.dtype)
 
-        mixed = self.proj_emit(self.norm_mix(contracted))
+        mixed = _project_channel_last(
+            self.proj_emit, _channel_major_layer_norm(self.norm_mix, contracted)
+        )
         output_gate = jax.nn.sigmoid(self.proj_gate(normalized))
         return mixed * output_gate
 
