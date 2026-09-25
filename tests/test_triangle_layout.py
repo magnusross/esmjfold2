@@ -103,3 +103,23 @@ def test_triangle_channel_major_model_gradient_at_real_width(flow):
         error = np.linalg.norm(np.asarray(new) - np.asarray(old))
         scale = max(1.0, np.linalg.norm(np.asarray(old)))
         assert error / scale < 1e-3
+
+
+@pytest.mark.parametrize("flow", ["outgoing", "incoming"])
+def test_triangle_channel_major_input_gradient_at_real_width(flow):
+    """Binderopt differentiates the input sequence through 256-channel blocks."""
+    block = make_block(channels=256, latent=256, flow=flow)
+    pair = jax.random.normal(jax.random.key(22), (1, 16, 16, 256)) * 0.2
+    cotangent = jax.random.normal(jax.random.key(23), pair.shape)
+
+    def evaluate(fn):
+        return eqx.filter_jit(jax.value_and_grad(
+            lambda x: jnp.sum(fn(block, x, None) * cotangent)
+        ))(pair)
+
+    old_value, old_grad = evaluate(reference)
+    new_value, new_grad = evaluate(lambda model, x, m: model(x, m))
+    np.testing.assert_allclose(new_value, old_value, rtol=1e-4, atol=1e-3)
+    old_grad, new_grad = np.asarray(old_grad), np.asarray(new_grad)
+    relative_l2 = np.linalg.norm(new_grad - old_grad) / np.linalg.norm(old_grad)
+    assert relative_l2 < 1e-4
