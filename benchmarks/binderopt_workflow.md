@@ -17,7 +17,7 @@ target=4ZQK optimizer=pgd profile=l40s profile.cache.offline=true
 num_designs=2 output_root=/tmp/binderopt-triangle-workflow/outputs
 ```
 
-The environment included `CUDA_VISIBLE_DEVICES=0`, `MOSAIC_CACHE_DIR=/data/magnross/.cache/mosaic`, `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`, and `JAX_COMPILATION_CACHE_DIR` pointing at the variant's temporary cache. Baseline used `PYTHONPATH=/data/magnross/code/binderopt/src`; changed used `PYTHONPATH=/tmp/esmjfold2-pinned-realtest/src:/data/magnross/code/binderopt/src`. The baseline experiment IDs were `triangle_baseline` and `triangle_baseline_repeat`; changed IDs were `triangle_optimized` and `triangle_optimized_repeat`.
+The environment included `CUDA_VISIBLE_DEVICES=0`, `MOSAIC_CACHE_DIR=/data/magnross/.cache/mosaic`, `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`, and `JAX_COMPILATION_CACHE_DIR` pointing at the variant's temporary cache. Baseline used `PYTHONPATH=/data/magnross/code/binderopt/src`; changed used `PYTHONPATH=/data/magnross/code/esmjfold2-binderopt-realtest/src:/data/magnross/code/binderopt/src`. The baseline experiment IDs were `triangle_baseline` and `triangle_baseline_repeat`; changed IDs were `triangle_optimized` and `triangle_optimized_repeat`.
 
 ## Recorded results
 
