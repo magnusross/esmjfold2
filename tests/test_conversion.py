@@ -5,9 +5,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-
 import torch
-
 from esm.models.esmc import EsmcConfig, EsmcForMaskedLM, EsmcModel
 from esm.models.esmfold2 import EsmFold2Config, EsmFold2ExperimentalModel, EsmFold2Model
 from esm.models.esmfold2.protein_utils import prepare_protein_features
@@ -123,14 +121,14 @@ def test_folding_components_parity(config):
     compare(converted.folding_trunk, model.folding_trunk, pair=z, pair_attention_mask=ctx.pair_mask)
 
     x = jax.random.normal(jax.random.key(2), features.ref_pos.shape)
-    args = dict(
-        x_noisy=x, t_hat=jnp.array([1.5]), ref_pos=features.ref_pos,
-        ref_charge=features.ref_charge, ref_mask=features.atom_attention_mask,
-        ref_space_uid=features.ref_space_uid, tok_idx=ctx.atom_to_token,
-        s_inputs=ctx.x_inputs, z_trunk=z,
-        relative_position_encoding=ctx.relative_position_encoding,
-        token_attention_mask=features.token_attention_mask,
-    )
+    args = {
+        "x_noisy": x, "t_hat": jnp.array([1.5]), "ref_pos": features.ref_pos,
+        "ref_charge": features.ref_charge, "ref_mask": features.atom_attention_mask,
+        "ref_space_uid": features.ref_space_uid, "tok_idx": ctx.atom_to_token,
+        "s_inputs": ctx.x_inputs, "z_trunk": z,
+        "relative_position_encoding": ctx.relative_position_encoding,
+        "token_attention_mask": features.token_attention_mask,
+    }
     torch_args = {k: tensor(v) for k, v in args.items()}
     torch_args.update(
         ref_element=tensor(ctx.ref_element_oh),
@@ -145,3 +143,43 @@ def test_folding_components_parity(config):
         ref_atom_name_chars_oh=ctx.ref_atom_name_chars_oh, n_tokens=3,
     )
     np.testing.assert_allclose(actual, expected.numpy(), rtol=3e-5, atol=3e-5)
+
+
+def test_grouped_folding_trunk_preserves_gradients(config):
+    # Five blocks exercises both a checkpointed group and the trailing block.
+    config.folding_trunk_num_hidden_layers = 5
+    trunk = esmjfold2.from_torch(EsmFold2Model(config).eval()).folding_trunk
+    pair = jax.random.normal(jax.random.key(30), (1, 7, 7, 16))
+    cotangent = jax.random.normal(jax.random.key(31), pair.shape)
+    mask = jnp.ones((1, 7, 7), dtype=jnp.float32)
+
+    def flat_scan(stack, x):
+        @jax.checkpoint
+        def body(p, params):
+            block = eqx.combine(stack.block_static, params)
+            return block(p, pair_attention_mask=mask), None
+        return jax.lax.scan(body, x, stack.block_params)[0]
+
+    def evaluate(forward):
+        return eqx.filter_jit(jax.value_and_grad(
+            lambda x: jnp.sum(forward(trunk, x) * cotangent)
+        ))(pair)
+
+    old_value, old_grad = evaluate(flat_scan)
+    new_value, new_grad = evaluate(
+        lambda stack, x: stack(x, pair_attention_mask=mask)
+    )
+    np.testing.assert_allclose(new_value, old_value, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(new_grad, old_grad, rtol=1e-5, atol=1e-5)
+
+    def parameter_gradients(forward):
+        return eqx.filter_jit(eqx.filter_value_and_grad(
+            lambda stack: jnp.sum(forward(stack, pair) * cotangent)
+        ))(trunk)[1]
+
+    old_params = parameter_gradients(flat_scan)
+    new_params = parameter_gradients(
+        lambda stack, x: stack(x, pair_attention_mask=mask)
+    )
+    for old, new in zip(jax.tree.leaves(old_params), jax.tree.leaves(new_params)):
+        np.testing.assert_allclose(new, old, rtol=1e-5, atol=1e-5)
