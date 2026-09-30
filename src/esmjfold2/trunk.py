@@ -21,7 +21,28 @@ class Transition(AbstractFromTorch):
     ffn: SwiGLU
 
     def __call__(self, x):
-        return x + self.ffn(self.norm(x))
+        # Pair transitions act independently on each (i, j) row. Keep the
+        # expanded SwiGLU activations to a bounded token-row band, including
+        # during backward, rather than materialising them for the whole pair.
+        chunk_rows = 128
+        if x.ndim != 4 or x.shape[1] <= chunk_rows:
+            return x + self.ffn(self.norm(x))
+
+        batch, n_rows, n_cols, channels = x.shape
+        pad_rows = (-n_rows) % chunk_rows
+        padded = jnp.pad(x, ((0, 0), (0, pad_rows), (0, 0), (0, 0)))
+        n_chunks = (n_rows + pad_rows) // chunk_rows
+        chunks = jnp.moveaxis(
+            padded.reshape(batch, n_chunks, chunk_rows, n_cols, channels), 1, 0
+        )
+
+        @jax.checkpoint
+        def chunk_forward(chunk):
+            return chunk + self.ffn(self.norm(chunk))
+
+        out = jax.lax.map(chunk_forward, chunks)
+        out = jnp.moveaxis(out, 0, 1).reshape(batch, n_rows + pad_rows, n_cols, channels)
+        return out[:, :n_rows]
 
 
 class PairTransition(AbstractFromTorch):
