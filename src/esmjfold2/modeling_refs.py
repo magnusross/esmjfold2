@@ -1,10 +1,17 @@
-"""Lazy imports of Biohub's native Torch modules for converter registration."""
+"""Lazy import of the PyTorch ESMFold2 modules for converter registration.
+
+Importing this module requires torch + the Biohub transformers fork. Only
+called when from_torch conversion is actually invoked.
+"""
 
 from __future__ import annotations
 
 
 def _esm():
-    """Return the native ESMFold2 layers and model modules."""
-    from esm.models.esmfold2 import layers, model
+    """Return (modeling_esmfold2_common, modeling_esmfold2)."""
+    from transformers.models.esmfold2 import (
+        modeling_esmfold2,
+        modeling_esmfold2_common,
+    )
 
-    return layers, model
+    return modeling_esmfold2_common, modeling_esmfold2

@@ -15,8 +15,8 @@ import equinox as eqx
 import numpy as np
 import torch
 
-from esm.models.esmfold2 import EsmFold2Model
-from esm.models.esmfold2.protein_utils import prepare_protein_features
+from transformers.models.esmfold2.modeling_esmfold2 import ESMFold2Model
+from transformers.models.esmfold2.protein_utils import prepare_protein_features
 
 import esmjfold2
 
@@ -33,15 +33,14 @@ def main():
 
     print(f"Loading ESMFold2-Fast (include_lm={args.include_lm})...")
     t0 = time.time()
-    model = EsmFold2Model.from_pretrained(
+    model = ESMFold2Model.from_pretrained(
         "biohub/ESMFold2-Fast",
-        device="cpu",
         load_esmc=args.include_lm,
         dtype=torch.float32,
         esmc_precision="fp32",
     ).eval()
     print(f"  loaded in {time.time()-t0:.1f}s. Trunk+head params: ", end="")
-    print(f"{sum(p.numel() for n, p in model.named_parameters() if not n.startswith('esmc.')):,}")
+    print(f"{sum(p.numel() for n, p in model.named_parameters() if not n.startswith('_esmc')):,}")
 
     features = prepare_protein_features(args.seq)
     B, L = features["res_type"].shape
@@ -56,7 +55,7 @@ def main():
     if args.include_lm:
         print("Converting ESMC-6B to JAX/Equinox...")
         t0 = time.time()
-        eqx_esmc = esmjfold2.from_torch(model.esmc)
+        eqx_esmc = esmjfold2.from_torch(model._esmc)
         print(f"  {time.time()-t0:.1f}s")
         print("Computing LM features in JAX...")
         t0 = time.time()

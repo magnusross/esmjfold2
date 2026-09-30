@@ -14,7 +14,8 @@ dependencies = [
     "torch",
     "accelerate",
     "safetensors",
-    # Native Torch models and checkpoint-layout translation from Biohub.
+    # Biohub model classes used by Mosaic for checkpoint conversion.
+    "transformers @ git+https://github.com/Biohub/transformers.git@ef32577f55da19a4989cd7b22e004dc43a4998cb",
     "esm==3.4.1.post1",
 ]
 

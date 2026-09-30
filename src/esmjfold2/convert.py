@@ -1,7 +1,7 @@
 """Orchestrate from_torch registrations.
 
 Importing this module performs the side-effect of registering all of esmjfold2's
-JAX modules into the singledispatch. Requires torch + Biohub esm package.
+JAX modules into the singledispatch. Requires torch + the Biohub Transformers fork.
 """
 
 from __future__ import annotations

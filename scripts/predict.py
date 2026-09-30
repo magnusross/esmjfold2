@@ -60,7 +60,7 @@ from esm.models.esmfold2 import (
     ProteinInput,
     StructurePredictionInput,
 )
-from esm.models.esmfold2 import EsmFold2Model
+from transformers.models.esmfold2.modeling_esmfold2 import ESMFold2Model
 
 
 # ---------------------------------------------------------------------------
@@ -228,15 +228,15 @@ def main() -> None:
     print(f"\nLoading {args.checkpoint} (with ESMC-6B; this allocates ~26 GB of CPU RAM)...")
     t0 = time.time()
     torch_model = (
-        EsmFold2Model.from_pretrained(
+        ESMFold2Model.from_pretrained(
             args.checkpoint,
             load_esmc=True,
-            device="cpu",
             dtype=torch.float32,
-            esmc_precision="fp32",
         )
         .eval()
     )
+    torch_model._esmc = torch_model._esmc.to(dtype=torch.float32)
+    torch_model._esmc_fp8 = False
     print(f"  loaded in {time.time() - t0:.1f}s")
 
     # ------------------------------------------------------------------
@@ -244,7 +244,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     print("Converting ESMC + ESMFold2 trunk/head to JAX...")
     t0 = time.time()
-    eqx_esmc = esmjfold2.from_torch(torch_model.esmc)
+    eqx_esmc = esmjfold2.from_torch(torch_model._esmc)
     eqx_trunk = esmjfold2.from_torch(torch_model)
     print(f"  converted in {time.time() - t0:.1f}s")
     # Free the torch reference now that we have JAX copies.
