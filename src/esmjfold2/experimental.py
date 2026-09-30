@@ -213,6 +213,7 @@ class ConfidenceHeadExperimental(eqx.Module):
         relative_position_encoding=None,
         token_bonds_encoding=None,
     ):
+        z = z.astype(self.s_to_z.weight.dtype)
         s_inputs_normed = self.s_inputs_norm(s_inputs)
         z_base = self.z_norm(z)
         if relative_position_encoding is not None:
@@ -535,6 +536,7 @@ class ESMFold2Experimental(eqx.Module):
             lm_z = jnp.where(mask, lm_z / keep_prob, 0.0)
 
         z_init = ctx.z_init + lm_z if lm_z is not None else ctx.z_init
+        z_init = z_init.astype(self.folding_trunk.block_params.tri_mul_out._engine.proj_bundle.weight.dtype)
         z0 = jnp.zeros_like(z_init)
 
         _do_msa_subsample = (

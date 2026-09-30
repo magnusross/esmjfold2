@@ -134,6 +134,32 @@ esmjfold2.save_model(eqx_trunk, "esmfold2")
 reloaded = esmjfold2.load_model("esmfold2")
 ```
 
+### Mixed precision
+
+Conversion preserves the source tensor dtype, including BF16. To use BF16
+weights and activations in the language model and folding path, apply the
+precision policy after conversion, before compiling:
+
+```python
+eqx_trunk = esmjfold2.mixed_precision(eqx_trunk)
+eqx_esmc = esmjfold2.mixed_precision(eqx_esmc)
+```
+
+This returns new models without modifying the originals. It supports both
+release and experimental ESMFold2, ESMC, and ESMCForMaskedLM. LayerNorm/RMSNorm
+reductions and triangle contractions accumulate in FP32; diffusion geometry,
+the release model's recurrence gates/readout, MSA encoders, and the distogram
+head remain FP32. The pair scan carries and ESMC hidden states use BF16.
+Existing FP32 models still run in FP32, and save/load preserves the selected
+dtypes. Mosaic's ESMFold2 and ESMC loaders apply this policy internally by
+default; their existing explicit private/ESMC `dtype=torch.float32` override
+retains the FP32 path. Public factory signatures are unchanged.
+
+Mixed precision changes outputs and gradients numerically. Validate the
+checkpoint and loss you use, particularly a coordinate-dependent loss that
+backpropagates through diffusion. Use `benchmarks/mixed_precision.py` to compare
+memory consumption, outputs, and gradients in fresh processes.
+
 ## Available inference knobs
 
 Defined on `ESMFold2.__call__`; the CLI mirrors all of them in `scripts/predict.py`:
@@ -149,7 +175,7 @@ CHAIN=path.a3m` (repeatable, attaches MSAs to chains).
 
 ## Notes on numerical parity
 
-- The torch reference runs the trunk under `torch.amp.autocast(bfloat16)`. The JAX path is fp32. Outputs differ by a few percent on a numeric level.
+- The torch reference runs the trunk under `torch.amp.autocast(bfloat16)`. The JAX FP32 path and optional mixed-precision policy have different rounding behavior; neither is guaranteed bit-identical to PyTorch.
 - The SWA atom attention uses `flash_attn_varlen` + a sliding window mask at training time. The JAX `SWAAtomTransformer.use_swa_window=True` default reproduces the trained-with-window behavior. Setting it to `False` recovers the torch `no-flash_attn` fallback (dense attention, no window/padding mask), only useful for parity testing — diverges from training.
 - The pair state is initialized with random truncated-normal noise; different RNG streams between JAX and torch produce different initial states and thus different sampler trajectories. Expected, not a bug.
 - Same-key JIT inference is bit-exact on CPU. On GPU there can be ~ULP differences run-to-run from cuBLAS / cuDNN non-deterministic reductions.

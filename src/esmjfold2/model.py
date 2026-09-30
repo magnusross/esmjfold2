@@ -316,6 +316,7 @@ class ESMFold2(eqx.Module):
         z = std * jax.random.truncated_normal(
             kinit, lower=-3, upper=3, shape=ctx.z_init.shape, dtype=jnp.float32
         )
+        z = z.astype(self.folding_trunk.block_params.tri_mul_out._engine.proj_bundle.weight.dtype)
 
         a, b = self._discretized_dynamics()
         a = a.reshape(1, 1, 1, -1)
@@ -385,7 +386,7 @@ class ESMFold2(eqx.Module):
                 z_inject_pair = z_inject_pair + refined_lm_z
 
             injected = self.parcae_input_norm(z_inject_pair)
-            z_new = a * z + injected @ b.T
+            z_new = a * z.astype(jnp.float32) + injected.astype(jnp.float32) @ b.T
             z_new = self.folding_trunk(z_new, pair_attention_mask=ctx.pair_mask)
             return (z_new, k)
 

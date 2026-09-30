@@ -30,7 +30,8 @@ def register_base_types():
     def _tensor(t):
         t = t.detach()
         if t.dtype == torch.bfloat16:
-            t = t.to(torch.float32)
+            # NumPy has no native BF16; use FP32 only as a transport format.
+            return jnp.asarray(t.to(torch.float32).cpu().numpy(), dtype=jnp.bfloat16)
         return jnp.asarray(t.cpu().numpy())
 
     from_torch.register(int, lambda x: x)

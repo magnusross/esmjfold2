@@ -14,6 +14,7 @@ from .primitives import LayerNorm, Linear
 
 def _project_channel_major(linear: Linear, x):
     """Apply a Linear to [B, N, N, C], writing [Out, B, N, N]."""
+    x = x.astype(linear.weight.dtype)
     y = jax.lax.dot_general(linear.weight, x, (((1,), (3,)), ((), ())))
     if linear.bias is not None:
         y = y + linear.bias[:, None, None, None]
@@ -22,6 +23,7 @@ def _project_channel_major(linear: Linear, x):
 
 def _project_channel_last(linear: Linear, x):
     """Apply a Linear to [In, B, N, N], writing [B, N, N, Out]."""
+    x = x.astype(linear.weight.dtype)
     y = jax.lax.dot_general(x, linear.weight, (((0,), (1,)), ((), ())))
     if linear.bias is not None:
         y = y + linear.bias
@@ -30,6 +32,9 @@ def _project_channel_last(linear: Linear, x):
 
 def _channel_major_layer_norm(norm: LayerNorm, x):
     """Match LayerNorm arithmetic while reducing over the leading channel axis."""
+    dtype = x.dtype
+    if dtype in (jnp.bfloat16, jnp.float16):
+        x = x.astype(jnp.float32)
     mean = jnp.mean(x, axis=0, keepdims=True)
     var = jnp.mean(jnp.square(x - mean), axis=0, keepdims=True)
     x = (x - mean) * jax.lax.rsqrt(var + norm.eps)
@@ -37,7 +42,7 @@ def _channel_major_layer_norm(norm: LayerNorm, x):
         x = x * norm.weight[:, None, None, None]
     if norm.bias is not None:
         x = x + norm.bias[:, None, None, None]
-    return x
+    return x.astype(dtype)
 
 
 class TriangleMultiplicativeBlock(AbstractFromTorch):
@@ -65,15 +70,20 @@ class TriangleMultiplicativeBlock(AbstractFromTorch):
         bundled = _project_channel_major(self.proj_bundle, normalized)
         signal, gate_logits = jnp.split(bundled, 2, axis=0)
         routed = signal * jax.nn.sigmoid(gate_logits)
-        routed = routed * mask[None]
+        routed = routed * mask[None].astype(routed.dtype)
 
         left, right = jnp.split(routed, 2, axis=0)
-        left = left.astype(jnp.float32)
-        right = right.astype(jnp.float32)
+        # BF16 operands remain compact; accumulate the contraction in FP32.
         if self.flow == "outgoing":
-            contracted = jax.lax.dot_general(left, right, (((3,), (3,)), ((0, 1), (0, 1))))
+            contracted = jax.lax.dot_general(
+                left, right, (((3,), (3,)), ((0, 1), (0, 1))),
+                preferred_element_type=jnp.float32,
+            )
         else:
-            contracted = jax.lax.dot_general(left, right, (((2,), (2,)), ((0, 1), (0, 1))))
+            contracted = jax.lax.dot_general(
+                left, right, (((2,), (2,)), ((0, 1), (0, 1))),
+                preferred_element_type=jnp.float32,
+            )
         contracted = contracted.astype(pair_grid.dtype)
 
         mixed = _project_channel_last(

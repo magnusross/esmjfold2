@@ -81,6 +81,9 @@ class FoldingTrunk(eqx.Module):
     block_static: PairUpdateBlock
 
     def __call__(self, pair, pair_attention_mask=None):
+        # Establish the scan carry dtype once, including callers with FP32
+        # recurrence gates or confidence inputs.
+        pair = pair.astype(self.block_params.tri_mul_out._engine.proj_bundle.weight.dtype)
         @jax.checkpoint
         def body(p, params):
             block = eqx.combine(self.block_static, params)

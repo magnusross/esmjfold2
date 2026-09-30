@@ -36,11 +36,12 @@ class LayerNormLinear(eqx.Module):
     eps: float = 1e-5
 
     def __call__(self, x):
+        x = x.astype(jnp.float32)
         mean = x.mean(axis=-1, keepdims=True)
         var = jnp.mean(jnp.square(x - mean), axis=-1, keepdims=True)
         x = (x - mean) * jax.lax.rsqrt(var + self.eps)
         x = x * self.layer_norm_weight + self.layer_norm_bias
-        return einops.einsum(x, self.weight, "... In, Out In -> ... Out")
+        return einops.einsum(x.astype(self.weight.dtype), self.weight, "... In, Out In -> ... Out")
 
     @classmethod
     def from_torch(cls, model):
@@ -68,11 +69,12 @@ class LayerNormMLP(eqx.Module):
     eps: float = 1e-5
 
     def __call__(self, x):
+        x = x.astype(jnp.float32)
         mean = x.mean(axis=-1, keepdims=True)
         var = jnp.mean(jnp.square(x - mean), axis=-1, keepdims=True)
         x = (x - mean) * jax.lax.rsqrt(var + self.eps)
         x = x * self.layer_norm_weight + self.layer_norm_bias
-        x = einops.einsum(x, self.fc1_weight, "... D, H D -> ... H")
+        x = einops.einsum(x.astype(self.fc1_weight.dtype), self.fc1_weight, "... D, H D -> ... H")
         x1, x2 = jnp.split(x, 2, axis=-1)
         x = jax.nn.silu(x1) * x2
         return einops.einsum(x, self.fc2_weight, "... H, D H -> ... D")
@@ -220,6 +222,9 @@ class TransformerStack(eqx.Module):
         XLA folds the checkpoint away; under autograd it caps the 80-layer
         stack's residual-stream memory at one block's worth.
         """
+        # Soft-input PLL callers may supply FP32 embeddings. Keep the scan
+        # carry and collected hidden states in the backbone's storage dtype.
+        x = x.astype(self.block_params.attn.layernorm_qkv.weight.dtype)
         @jax.checkpoint
         def body(state, params):
             block = eqx.combine(self.block_static, params)

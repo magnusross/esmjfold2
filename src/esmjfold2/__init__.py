@@ -11,6 +11,7 @@ from .features import Features
 from .lm_features import compute_lm_hidden_states
 from .model import ESMFold2
 from .prediction import Prediction
+from .precision import mixed_precision
 from .serialization import load_model, save_model
 from .structure_output import (
     output_to_mmcif,
@@ -47,6 +48,7 @@ __all__ = [
     "compute_lm_hidden_states",
     "from_torch",
     "load_model",
+    "mixed_precision",
     "output_to_mmcif",
     "output_to_mmcif_multi",
     "output_to_molecular_complex",

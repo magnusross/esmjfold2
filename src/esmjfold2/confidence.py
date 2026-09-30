@@ -79,6 +79,7 @@ class ConfidenceHead(eqx.Module):
         atom_attention_mask, asym_id, mol_type,
         relative_position_encoding=None, token_bonds_encoding=None,
     ):
+        z = z.astype(self.s_to_z.weight.dtype)
         s_inputs_normed = self.s_inputs_norm(s_inputs)
         z_base = self.z_norm(z)
         if relative_position_encoding is not None:

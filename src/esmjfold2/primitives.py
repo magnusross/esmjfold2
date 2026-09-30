@@ -20,6 +20,7 @@ class Linear(AbstractFromTorch):
     bias: Float[Array, "Out"] | None = None
 
     def __call__(self, x):
+        x = x.astype(self.weight.dtype)
         o = einops.einsum(x, self.weight, "... In, Out In -> ... Out")
         if self.bias is not None:
             o = o + self.bias
@@ -32,6 +33,9 @@ class LayerNorm(AbstractFromTorch):
     eps: float = 1e-5
 
     def __call__(self, x):
+        dtype = x.dtype
+        if dtype in (jnp.bfloat16, jnp.float16):
+            x = x.astype(jnp.float32)
         mean = x.mean(axis=-1, keepdims=True)
         var = jnp.mean(jnp.square(x - mean), axis=-1, keepdims=True)
         x = (x - mean) * jax.lax.rsqrt(var + self.eps)
@@ -39,7 +43,7 @@ class LayerNorm(AbstractFromTorch):
             x = x * self.weight
         if self.bias is not None:
             x = x + self.bias
-        return x
+        return x.astype(dtype)
 
 
 class RMSNorm(AbstractFromTorch):
@@ -47,11 +51,14 @@ class RMSNorm(AbstractFromTorch):
     eps: float = 1e-6
 
     def __call__(self, x):
+        dtype = x.dtype
+        if dtype in (jnp.bfloat16, jnp.float16):
+            x = x.astype(jnp.float32)
         var = jnp.mean(jnp.square(x), axis=-1, keepdims=True)
         x = x * jax.lax.rsqrt(var + self.eps)
         if self.weight is not None:
             x = x * self.weight
-        return x
+        return x.astype(dtype)
 
 
 class Embedding(AbstractFromTorch):

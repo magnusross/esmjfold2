@@ -31,6 +31,7 @@ def _rotate_half(x):
 def apply_rotary_emb_3d(x, cos, sin):
     """Apply RoPE with batched cos/sin.
     x: [B, L, H, D]; cos, sin: [B, L, D/2]."""
+    cos, sin = cos.astype(x.dtype), sin.astype(x.dtype)
     ro_dim = cos.shape[-1] * 2
     cos = jnp.broadcast_to(cos[:, :, None, :], (cos.shape[0], cos.shape[1], x.shape[2], cos.shape[-1]))
     sin = jnp.broadcast_to(sin[:, :, None, :], (sin.shape[0], sin.shape[1], x.shape[2], sin.shape[-1]))
