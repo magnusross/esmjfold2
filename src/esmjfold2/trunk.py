@@ -65,7 +65,30 @@ class FoldingTrunk(eqx.Module):
             block = eqx.combine(self.block_static, params)
             return block(p, pair_attention_mask=pair_attention_mask), None
 
-        pair, _ = jax.lax.scan(body, pair, self.block_params)
+        # A scan's transpose retains its carry at every block even when the
+        # body is checkpointed. Checkpoint groups of blocks so backward only
+        # retains the carry at group boundaries, then recomputes each group.
+        n_blocks = jax.tree.leaves(self.block_params)[0].shape[0]
+        group_size = 4
+        if n_blocks <= group_size:
+            return jax.lax.scan(body, pair, self.block_params)[0]
+
+        n_groups = n_blocks // group_size
+        grouped_count = n_groups * group_size
+        grouped = jax.tree.map(
+            lambda x: x[:grouped_count].reshape((n_groups, group_size) + x.shape[1:]),
+            self.block_params,
+        )
+
+        @jax.checkpoint
+        def group_body(p, params):
+            p, _ = jax.lax.scan(body, p, params)
+            return p, None
+
+        pair, _ = jax.lax.scan(group_body, pair, grouped)
+        if grouped_count < n_blocks:
+            tail = jax.tree.map(lambda x: x[grouped_count:], self.block_params)
+            pair, _ = jax.lax.scan(body, pair, tail)
         return pair
 
     @classmethod
@@ -74,7 +97,7 @@ class FoldingTrunk(eqx.Module):
         if not blocks:
             raise ValueError("Empty FoldingTrunk.blocks")
         # Partition arrays/static using the first block as the static skeleton.
-        params0, static = eqx.partition(blocks[0], eqx.is_inexact_array)
+        _, static = eqx.partition(blocks[0], eqx.is_inexact_array)
         stacked = jax.tree.map(
             lambda *vs: jnp.stack(vs, 0),
             *[eqx.filter(b, eqx.is_inexact_array) for b in blocks],
